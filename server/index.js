@@ -57,7 +57,8 @@ fastify.post('/api/register/options', async (request, reply) => {
     },
     attestationType: ATTESTATION,
     authenticatorSelection: {
-      residentKey: 'preferred',
+      // просим не создавать резидентные (discoverable) креды, чтобы ключ не требовал PIN
+      residentKey: 'discouraged',
       // просим не требовать PIN/UV для демо
       userVerification: 'discouraged',
       requireResidentKey: false,
