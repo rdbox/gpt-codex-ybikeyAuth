@@ -69,9 +69,11 @@ fastify.post('/api/register/options', async (request, reply) => {
   const challenge = options.challenge ?? '';
   const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
   options.challenge = toBase64url(challenge);
+  // Явно формируем user, чтобы не потерять поля при сериализации
   options.user = {
-    ...options.user,
     id: toBase64url(userId),
+    name: user.username,
+    displayName: user.username,
   };
   options.excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
     ...cred,
