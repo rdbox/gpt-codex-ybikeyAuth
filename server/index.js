@@ -134,7 +134,7 @@ fastify.post('/api/register/verify', async (request, reply) => {
       expectedChallenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: true,
+      requireUserVerification: false,
     });
 
     if (verification.verified) {
@@ -201,6 +201,7 @@ fastify.post('/api/login/options', async (request, reply) => {
     allowCredentials: (options.allowCredentials || []).map((cred) => ({
       ...cred,
       id: toBase64url(cred.id),
+      transports: cred.transports || ['usb', 'nfc', 'ble', 'internal'],
     })),
     timeout: options.timeout,
     userVerification: options.userVerification,
@@ -240,7 +241,7 @@ fastify.post('/api/login/verify', async (request, reply) => {
       expectedChallenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: true,
+      requireUserVerification: false,
       authenticator: {
         credentialID: Buffer.from(authenticator.credentialID, 'base64url'),
         credentialPublicKey: Buffer.from(authenticator.publicKey, 'base64'),
