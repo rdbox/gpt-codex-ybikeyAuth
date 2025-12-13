@@ -58,7 +58,8 @@ fastify.post('/api/register/options', async (request, reply) => {
     attestationType: ATTESTATION,
     authenticatorSelection: {
       residentKey: 'preferred',
-      userVerification: 'preferred',
+      // просим не требовать PIN/UV для демо
+      userVerification: 'discouraged',
     },
     excludeCredentials: user.credentials.map((cred) => ({
       id: Buffer.from(cred.credentialID, 'base64url'),
@@ -184,7 +185,8 @@ fastify.post('/api/login/options', async (request, reply) => {
 
   const options = generateAuthenticationOptions({
     rpID: RP_ID,
-    userVerification: 'preferred',
+    // просим не требовать PIN/UV для демо
+    userVerification: 'discouraged',
     allowCredentials: user.credentials.map((cred) => ({
       id: Buffer.from(cred.credentialID, 'base64url'),
       type: 'public-key',
