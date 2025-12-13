@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YubiKey Auth Demo · WebAuthn</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">YubiKey / FIDO2 / WebAuthn</p>
+        <h1>Аппаратная авторизация с YubiKey</h1>
+        <p class="lede">Регистрация и вход с физическим ключом. Видно каждый технический шаг: challenge, attestation, assertion, проверка на сервере.</p>
+        <div class="actions">
+          <input id="username" type="text" placeholder="username" autocomplete="username" />
+          <button id="registerBtn">Зарегистрироваться</button>
+          <button id="loginBtn" class="ghost">Войти с YubiKey</button>
+        </div>
+        <p class="hint">Поддерживаются ключи YubiKey с FIDO2/WebAuthn. Работает на localhost без HTTPS.</p>
+      </div>
+      <div class="device-callout">
+        <div class="dot"></div>
+        <div class="chip">
+          <span>YubiKey</span>
+        </div>
+        <p>Коснитесь ключа, когда появится системный диалог.</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Таймлайн</p>
+          <h2>Шаги WebAuthn</h2>
+        </div>
+        <button id="resetBtn" class="text-btn">Сбросить</button>
+      </div>
+      <div id="steps" class="steps"></div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Сырые данные</p>
+            <h3>clientDataJSON / authenticatorData</h3>
+          </div>
+        </div>
+        <pre id="rawData" class="code"></pre>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Ответ сервера</p>
+            <h3>Проверка на бэкенде</h3>
+          </div>
+        </div>
+        <pre id="serverData" class="code"></pre>
+      </div>
+    </section>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

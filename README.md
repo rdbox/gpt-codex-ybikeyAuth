@@ -1,99 +1,67 @@
-# claude-webauth
+# YubiKey Auth Demo (WebAuthn/FIDO2)
 
-Утилита `api_diagnostic.py` выполняет детальную проверку работоспособности API OpenAI GPT и Google Gemini. Скрипт поддерживает одиночные ключи и списки ключей, автоматически определяет тип ключа по префиксу и выводит подробный отчет по каждому шагу.
+Демо‑микросервис для регистрации и входа с аппаратным ключом YubiKey через WebAuthn/FIDO2. Показывает весь поток: challenge → WebAuthn → attestation/assertion → проверка на сервере, с визуализацией сырых данных.
 
-<<<<<<< HEAD
-## Быстрый старт
-1. Убедитесь, что установлен Python 3 и доступен модуль `requests` (при необходимости установите `pip install requests`).
-2. Сохраните или скопируйте ваши ключи OpenAI (начинаются с `sk-` или `sk-proj-`) и Gemini (начинаются с `AIza`).
-3. Запустите скрипт в терминале:
-   ```bash
-   python3 api_diagnostic.py sk-ваш_openai AIzaSy_ваш_gemini
-   ```
-   Ключи можно передавать в любом порядке — скрипт сам определит тип по префиксу.
+## Что нужно
+- Node.js 18+
+- Аппаратный ключ с поддержкой FIDO2/WebAuthn (YubiKey)
+- Браузер с поддержкой WebAuthn (Chrome/Edge/Firefox)
 
-## Режимы запуска
-### 1) Позиционные ключи (автоопределение)
-- Один OpenAI и один Gemini ключ: `python3 api_diagnostic.py sk-xxx AIzaSy-yyy`
-- Только OpenAI ключи: `python3 api_diagnostic.py sk-xxx sk-yyy`
-- Только Gemini ключи: `python3 api_diagnostic.py AIzaSy-xxx AIzaSy-yyy`
+## Установка
+```bash
+git clone git@github.com-rdbox:rdbox/gpt-codex.git
+cd gpt-codex
+npm install
+```
 
-### 2) Явное указание провайдера
-Используйте флаги `--openai` / `--gemini` для явного разделения ключей:
-- `python3 api_diagnostic.py --openai sk-xxx sk-yyy --gemini AIzaSy1 AIzaSy2`
+## Запуск
+- Сервер (Fastify + @simplewebauthn/server, статика SPA):
+  ```bash
+  npm start
+  ```
+- Открыть фронтенд: `http://localhost:3000`
 
-### 3) Пропуск определения IP
-Чтобы не отправлять запрос на определение IP/географии, добавьте флаг:
-- `python3 api_diagnostic.py --skip-ip-check sk-xxx`
+## Конфигурация
+Настройте переменные в `.env` (необязательно, есть значения по умолчанию):
+```
+PORT=3000
+RP_ID=localhost
+RP_NAME=YubiKey Auth Demo
+ORIGIN=http://localhost:3000
+ATTESTATION=none   # direct для показа данных устройства
+```
 
-### 4) Тестовый GET-запрос Gemini
-Для проверки конкретного GET-эндпойнта Gemini передайте `--gemini-get-url`. Используется первый Gemini ключ из списка:
-- `python3 api_diagnostic.py --gemini AIzaSyExample --gemini-get-url models/gemini-pro`
+## Флоу регистрации
+1. Введите username → «Зарегистрироваться».
+2. Браузер получает challenge (`/api/register/options`) и вызывает `navigator.credentials.create()`.
+3. Коснитесь ключа. UI покажет `clientDataJSON`, `attestationObject`, флаги и данные, которые уходят на сервер.
+4. Сервер валидирует (challenge, rpId, origin, attestation) и сохраняет credential (publicKey, credentialId, signCount).
 
-## Что делает скрипт
-1. **Определение IP (опционально)** — выводит текущий IP, страну, город и провайдера (если не указан `--skip-ip-check`).
-2. **Проверка OpenAI** — для каждого ключа по очереди:
-   - Доступность `https://api.openai.com/v1/models` и валидность ключа.
-   - Получение списка моделей.
-   - Тестовый чат-запрос к `gpt-3.5-turbo` и вывод времени/токенов.
-3. **Проверка Gemini** — для каждого ключа либо выполняется стандартный тест запроса `gemini-pro:generateContent`, либо единственный пользовательский GET-запрос, если указан `--gemini-get-url`.
-4. **Итоговый отчет** — сводка по каждому ключу и общий итог (успех/ошибка/пропуск).
+## Флоу входа
+1. Введите существующий username → «Войти с YubiKey».
+2. Браузер получает challenge (`/api/login/options`) и вызывает `navigator.credentials.get()`.
+3. Коснитесь ключа — получим assertion (`authenticatorData`, `signature`).
+4. Сервер проверяет подпись, rpIdHash, origin, рост `signCount`; при успехе вход завершён.
 
-## Как читать вывод
-- Зеленые строки `✅` — шаг выполнен успешно, ключ рабочий.
-- Красные строки `❌` — ошибка (неверный ключ, блокировка IP, проблемы сети или эндпойнта).
-- Желтые строки `⚠️` — предупреждения, пропуски или невозможность определить тип ключа.
-- Финальный баннер показывает, прошли ли оба провайдера без ошибок.
+## API (кратко)
+- `POST /api/register/options { username }` → PublicKeyCredentialCreationOptions
+- `POST /api/register/verify { username, attestationResponse }` → { verified, registrationInfo }
+- `POST /api/login/options { username }` → PublicKeyCredentialRequestOptions
+- `POST /api/login/verify { username, assertionResponse }` → { verified, authenticationInfo }
+- `GET /api/users/:username` → список credential и signCount (демо)
 
-## Полезные советы
-- Если ключ не распознан по префиксу, он по умолчанию попадет в список OpenAI (об этом будет предупреждение). Используйте флаги `--openai` / `--gemini`, чтобы указать явно.
-- При проверке нескольких ключей вывод для каждого ключа группируется отдельным заголовком `OPENAI КЛЮЧ X/Y` или `GEMINI КЛЮЧ X/Y`.
-- При использовании `--gemini-get-url` стандартные запросы Gemini пропускаются; выполняется только указанный GET для первого Gemini ключа.
-=======
-## Быстрый старт
-1. Убедитесь, что установлен Python 3 и доступен модуль `requests` (при необходимости установите `pip install requests`).
-2. Сохраните или скопируйте ваши ключи OpenAI (начинаются с `sk-` или `sk-proj-`) и Gemini (начинаются с `AIza`).
-3. Запустите скрипт в терминале:
-   ```bash
-   python3 api_diagnostic.py sk-ваш_openai AIzaSy_ваш_gemini
-   ```
-   Ключи можно передавать в любом порядке — скрипт сам определит тип по префиксу.
+## Хранилище
+In-memory (Map). Данные живут, пока работает сервер. Структура пользователя: username, userId, credentials[{ credentialID, publicKey, counter, deviceType, backedUp, aaguid, transports }].
 
-## Режимы запуска
-### 1) Позиционные ключи (автоопределение)
-- Один OpenAI и один Gemini ключ: `python3 api_diagnostic.py sk-xxx AIzaSy-yyy`
-- Только OpenAI ключи: `python3 api_diagnostic.py sk-xxx sk-yyy`
-- Только Gemini ключи: `python3 api_diagnostic.py AIzaSy-xxx AIzaSy-yyy`
+## Замечания по безопасности
+- Для продакшна нужен HTTPS (WebAuthn этого требует); localhost работает на HTTP.
+- Проверяем `origin`, `rpId`, одноразовый `challenge`, рост `signCount`.
+- Username ограничен до `a-z0-9_-` (1..32) для демо.
 
-### 2) Явное указание провайдера
-Используйте флаги `--openai` / `--gemini` для явного разделения ключей:
-- `python3 api_diagnostic.py --openai sk-xxx sk-yyy --gemini AIzaSy1 AIzaSy2`
+## Типичные ошибки
+- `NotAllowedError`: пользователь отменил диалог или истёк таймаут.
+- `InvalidStateError` при регистрации: credential уже зарегистрирован.
+- `rpId`/`origin` mismatch: проверьте `.env` и домен страницы.
 
-### 3) Пропуск определения IP
-Чтобы не отправлять запрос на определение IP/географии, добавьте флаг:
-- `python3 api_diagnostic.py --skip-ip-check sk-xxx`
-
-### 4) Тестовый GET-запрос Gemini
-Для проверки конкретного GET-эндпойнта Gemini передайте `--gemini-get-url`. Используется первый Gemini ключ из списка:
-- `python3 api_diagnostic.py --gemini AIzaSyExample --gemini-get-url models/gemini-pro`
-
-## Что делает скрипт
-1. **Определение IP (опционально)** — выводит текущий IP, страну, город и провайдера (если не указан `--skip-ip-check`).
-2. **Проверка OpenAI** — для каждого ключа по очереди:
-   - Доступность `https://api.openai.com/v1/models` и валидность ключа.
-   - Получение списка моделей.
-   - Тестовый чат-запрос к `gpt-3.5-turbo` и вывод времени/токенов.
-3. **Проверка Gemini** — для каждого ключа либо выполняется стандартный тест запроса `gemini-pro:generateContent`, либо единственный пользовательский GET-запрос, если указан `--gemini-get-url`.
-4. **Итоговый отчет** — сводка по каждому ключу и общий итог (успех/ошибка/пропуск).
-
-## Как читать вывод
-- Зеленые строки `✅` — шаг выполнен успешно, ключ рабочий.
-- Красные строки `❌` — ошибка (неверный ключ, блокировка IP, проблемы сети или эндпойнта).
-- Желтые строки `⚠️` — предупреждения, пропуски или невозможность определить тип ключа.
-- Финальный баннер показывает, прошли ли оба провайдера без ошибок.
-
-## Полезные советы
-- Если ключ не распознан по префиксу, он по умолчанию попадет в список OpenAI (об этом будет предупреждение). Используйте флаги `--openai` / `--gemini`, чтобы указать явно.
-- При проверке нескольких ключей вывод для каждого ключа группируется отдельным заголовком `OPENAI КЛЮЧ X/Y` или `GEMINI КЛЮЧ X/Y`.
-- При использовании `--gemini-get-url` стандартные запросы Gemini пропускаются; выполняется только указанный GET для первого Gemini ключа.
->>>>>>> 1602a75 (Add detailed usage instructions)
+## Разработка
+Проект без сборки фронта (простая статика). Всё лежит в `public/`, бек — в `server/`. Если нужно расширить, можно добавить Vite/React поверх текущей структуры.
