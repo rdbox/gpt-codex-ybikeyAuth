@@ -60,7 +60,9 @@ fastify.post('/api/register/options', async (request, reply) => {
       residentKey: 'preferred',
       // просим не требовать PIN/UV для демо
       userVerification: 'discouraged',
+      requireResidentKey: false,
     },
+    timeout: 120000,
     excludeCredentials: user.credentials.map((cred) => ({
       id: Buffer.from(cred.credentialID, 'base64url'),
       type: 'public-key',
@@ -192,7 +194,7 @@ fastify.post('/api/login/options', async (request, reply) => {
       type: 'public-key',
       transports: cred.transports || undefined,
     })),
-    timeout: 60000,
+    timeout: 120000,
   });
 
   const challenge = options.challenge ?? randomBytes(32);
