@@ -66,8 +66,13 @@ fastify.post('/api/register/options', async (request, reply) => {
   });
 
   // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
-  options.challenge = toBase64url(options.challenge);
-  options.user.id = toBase64url(options.user.id);
+  const challenge = options.challenge ?? '';
+  const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
+  options.challenge = toBase64url(challenge);
+  options.user = {
+    ...options.user,
+    id: toBase64url(userId),
+  };
   options.excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
     ...cred,
     id: toBase64url(cred.id),
