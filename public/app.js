@@ -85,8 +85,12 @@ function prepareRegistrationOptions(opts) {
   if (!opts) throw new Error('Пустые options для регистрации');
   if (!opts.user || !opts.user.id) throw new Error('Пустой user.id в options регистрации');
   if (!opts.challenge) throw new Error('Пустой challenge в options регистрации');
+  if (!opts.pubKeyCredParams || !opts.pubKeyCredParams.length) {
+    throw new Error('Пустой pubKeyCredParams в options регистрации');
+  }
   return {
     ...opts,
+    pubKeyCredParams: opts.pubKeyCredParams,
     challenge: base64urlToBuffer(opts.challenge),
     user: {
       ...opts.user,

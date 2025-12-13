@@ -77,7 +77,11 @@ fastify.post('/api/register/options', async (request, reply) => {
       displayName: user.username,
     },
     challenge: toBase64url(challenge),
-    pubKeyCredParams: options.pubKeyCredParams,
+    pubKeyCredParams: options.pubKeyCredParams || [
+      { type: 'public-key', alg: -8 },
+      { type: 'public-key', alg: -7 },
+      { type: 'public-key', alg: -257 },
+    ],
     timeout: options.timeout,
     attestation: options.attestation,
     authenticatorSelection: options.authenticatorSelection,
