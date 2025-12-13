@@ -72,6 +72,7 @@ function bufferToBase64url(buffer) {
 }
 
 function base64urlToBuffer(str) {
+  if (!str) return new ArrayBuffer(0);
   const pad = '='.repeat((4 - (str.length % 4)) % 4);
   const normalized = str.replace(/-/g, '+').replace(/_/g, '/') + pad;
   const binary = atob(normalized);
@@ -81,6 +82,9 @@ function base64urlToBuffer(str) {
 }
 
 function prepareRegistrationOptions(opts) {
+  if (!opts) throw new Error('Пустые options для регистрации');
+  if (!opts.user || !opts.user.id) throw new Error('Пустой user.id в options регистрации');
+  if (!opts.challenge) throw new Error('Пустой challenge в options регистрации');
   return {
     ...opts,
     challenge: base64urlToBuffer(opts.challenge),
