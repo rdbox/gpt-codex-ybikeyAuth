@@ -8,6 +8,7 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+import { randomBytes } from 'crypto';
 import { RP_ID, RP_NAME, ORIGIN, PORT, ATTESTATION } from './config.js';
 import { db } from './store.js';
 
@@ -66,7 +67,7 @@ fastify.post('/api/register/options', async (request, reply) => {
   });
 
   // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
-  const challenge = options.challenge ?? '';
+  const challenge = options.challenge ?? randomBytes(32);
   const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
   const responsePayload = {
     rp: options.rp,
@@ -88,6 +89,15 @@ fastify.post('/api/register/options', async (request, reply) => {
   };
 
   db.setChallenge(safeName, responsePayload.challenge);
+  request.log.info(
+    {
+      route: 'register/options',
+      username: safeName,
+      challenge: responsePayload.challenge,
+      user: responsePayload.user,
+    },
+    'registration options issued'
+  );
   return responsePayload;
 });
 
@@ -173,8 +183,10 @@ fastify.post('/api/login/options', async (request, reply) => {
     timeout: 60000,
   });
 
+  const challenge = options.challenge ?? randomBytes(32);
+
   const responsePayload = {
-    challenge: toBase64url(options.challenge),
+    challenge: toBase64url(challenge),
     rpId: options.rpID,
     allowCredentials: (options.allowCredentials || []).map((cred) => ({
       ...cred,
