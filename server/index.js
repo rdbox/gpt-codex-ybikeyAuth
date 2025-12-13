@@ -1,136 +1,167 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Fastify from 'fastify';
-import fastifyStatic from '@fastify/static';
+import express from 'express';
+import session from 'express-session';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { randomBytes } from 'crypto';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import { randomBytes } from 'crypto';
-import { RP_ID, RP_NAME, ORIGIN, PORT, ATTESTATION } from './config.js';
-import { db } from './store.js';
+import { initStorage, upsertUser, getUser, saveUser, listUsers, setChallenge, popChallenge } from './storage.js';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const fastify = Fastify({ logger: true });
+const app = express();
+const PORT = process.env.PORT || 4000;
+const RP_ID = process.env.RP_ID || 'localhost';
+const RP_NAME = process.env.RP_NAME || 'YubiKey Auth Demo';
+const ORIGIN = process.env.ORIGIN || `http://localhost:${PORT}`;
+const ATTESTATION = process.env.ATTESTATION || 'none';
+const AUTH_MODE = process.env.AUTH_MODE || 'touch_only'; // touch_only | pin_required | preferred
+const LOCK_SETTINGS = process.env.LOCK_SETTINGS === 'true';
+const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
 
-fastify.register(fastifyStatic, {
-  root: path.join(__dirname, '..', 'public'),
-  prefix: '/',
-});
-
-const toBase64url = (value) => {
-  if (!value) return '';
-  if (typeof value === 'string') return value;
-  return Buffer.from(value).toString('base64url');
+const modeToUV = {
+  touch_only: 'discouraged',
+  pin_required: 'required',
+  preferred: 'preferred',
 };
+
+let currentMode = AUTH_MODE in modeToUV ? AUTH_MODE : 'touch_only';
+
+app.use(
+  cors({
+    origin: ORIGIN,
+    credentials: true,
+  }),
+);
+app.use(express.json({ limit: '1mb' }));
+app.use(
+  session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false, httpOnly: true, maxAge: 24 * 60 * 60 * 1000 },
+  }),
+);
+
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+const toBase64url = (val) => {
+  if (!val) return '';
+  if (typeof val === 'string') return val;
+  return Buffer.from(val).toString('base64url');
+};
+
+const fromBase64 = (val) => Buffer.from(val, 'base64');
 
 const validateUsername = (username) => {
   if (typeof username !== 'string') return null;
   const trimmed = username.trim();
-  if (!trimmed) return null;
-  // ограничиваем простой алфанумерикой для демо
-  const safe = trimmed.toLowerCase();
-  if (!/^[a-z0-9_-]{1,32}$/.test(safe)) return null;
-  return safe;
+  if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmed)) return null;
+  return trimmed;
 };
 
-fastify.post('/api/register/options', async (request, reply) => {
-  const { username } = request.body || {};
-  const safeName = validateUsername(username);
-  if (!safeName) {
-    return reply.code(400).send({ error: 'Некорректное имя пользователя' });
-  }
+// SETTINGS
+app.get('/api/settings', (req, res) => {
+  res.json({
+    modes: [
+      { id: 'touch_only', name: 'Только касание', userVerification: 'discouraged' },
+      { id: 'pin_required', name: 'PIN обязателен', userVerification: 'required' },
+      { id: 'preferred', name: 'Авто', userVerification: 'preferred' },
+    ],
+    protocols: [
+      { id: 'webauthn', name: 'WebAuthn/FIDO2', enabled: true },
+      { id: 'u2f', name: 'FIDO U2F', enabled: true },
+    ],
+    currentMode,
+    currentProtocol: 'webauthn',
+    canChangeMode: !LOCK_SETTINGS,
+    isLocked: LOCK_SETTINGS,
+  });
+});
 
-  const user = db.upsertUser(safeName);
+app.post('/api/settings/mode', (req, res) => {
+  if (LOCK_SETTINGS) return res.status(403).json({ error: 'Настройки заблокированы' });
+  const { mode } = req.body || {};
+  if (!mode || !(mode in modeToUV)) return res.status(400).json({ error: 'Некорректный режим' });
+  currentMode = mode;
+  res.json({ success: true, currentMode });
+});
+
+// REGISTER OPTIONS
+app.post('/api/register/options', async (req, res) => {
+  const { username, displayName } = req.body || {};
+  const safeName = validateUsername(username);
+  if (!safeName) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+
+  const user = await upsertUser(safeName.toLowerCase(), displayName || safeName);
 
   const options = generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
     user: {
-      id: Buffer.from(user.userId, 'utf8'),
+      id: fromBase64(user.id),
       name: user.username,
-      displayName: user.username,
+      displayName: user.displayName,
     },
     attestationType: ATTESTATION,
     authenticatorSelection: {
-      // просим не создавать резидентные (discoverable) креды, чтобы ключ не требовал PIN
+      authenticatorAttachment: 'cross-platform',
       residentKey: 'discouraged',
-      // просим не требовать PIN/UV для демо
-      userVerification: 'discouraged',
+      userVerification: modeToUV[currentMode],
       requireResidentKey: false,
     },
-    timeout: 120000,
-    excludeCredentials: user.credentials.map((cred) => ({
-      id: Buffer.from(cred.credentialID, 'base64url'),
-      type: 'public-key',
-    })),
+    pubKeyCredParams: [
+      { type: 'public-key', alg: -8 },
+      { type: 'public-key', alg: -7 },
+      { type: 'public-key', alg: -257 },
+    ],
   });
 
-  // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
   const challenge = options.challenge ?? randomBytes(32);
-  const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
-  const rp = { name: RP_NAME, id: RP_ID };
-  const pubKeyCredParams =
-    options.pubKeyCredParams && options.pubKeyCredParams.length
-      ? options.pubKeyCredParams
-      : [
-          { type: 'public-key', alg: -8 },
-          { type: 'public-key', alg: -7 },
-          { type: 'public-key', alg: -257 },
-        ];
-
   const responsePayload = {
-    rp,
-    user: {
-      id: toBase64url(userId),
-      name: user.username,
-      displayName: user.username,
-    },
     challenge: toBase64url(challenge),
-    pubKeyCredParams,
-    timeout: options.timeout,
-    attestation: options.attestation,
-    authenticatorSelection: options.authenticatorSelection,
+    rp: { name: RP_NAME, id: RP_ID },
+    user: {
+      id: toBase64url(options.user.id),
+      name: user.username,
+      displayName: user.displayName,
+    },
+    pubKeyCredParams: options.pubKeyCredParams,
     excludeCredentials: (options.excludeCredentials || []).map((cred) => ({
-      ...cred,
       id: toBase64url(cred.id),
+      type: cred.type,
+      transports: ['usb', 'nfc', 'ble', 'internal'],
     })),
+    authenticatorSelection: options.authenticatorSelection,
+    attestation: options.attestation,
     extensions: options.extensions,
+    timeout: options.timeout || 120000,
   };
 
-  db.setChallenge(safeName, responsePayload.challenge);
-  request.log.info(
-    {
-      route: 'register/options',
-      username: safeName,
-      challenge: responsePayload.challenge,
-      user: responsePayload.user,
-    },
-    'registration options issued'
-  );
-  return responsePayload;
+  await setChallenge(safeName, responsePayload.challenge);
+  res.json(responsePayload);
 });
 
-fastify.post('/api/register/verify', async (request, reply) => {
-  const { username, attestationResponse } = request.body || {};
+// REGISTER VERIFY
+app.post('/api/register/verify', async (req, res) => {
+  const { username, attestationResponse } = req.body || {};
   const safeName = validateUsername(username);
-  if (!safeName || !attestationResponse) {
-    return reply.code(400).send({ error: 'Некорректные данные регистрации' });
-  }
+  if (!safeName || !attestationResponse) return res.status(400).json({ error: 'Некорректные данные регистрации' });
 
-  const expectedChallenge = db.popChallenge(safeName);
-  if (!expectedChallenge) {
-    return reply.code(400).send({ error: 'Challenge не найден или просрочен' });
-  }
+  const expectedChallenge = await popChallenge(safeName);
+  if (!expectedChallenge) return res.status(400).json({ error: 'Challenge не найден или просрочен' });
 
-  const user = db.getUser(safeName);
-  if (!user) {
-    return reply.code(404).send({ error: 'Пользователь не найден' });
-  }
+  const user = await getUser(safeName);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
   try {
     const verification = await verifyRegistrationResponse({
@@ -138,7 +169,7 @@ fastify.post('/api/register/verify', async (request, reply) => {
       expectedChallenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: currentMode === 'pin_required',
     });
 
     if (verification.verified) {
@@ -151,94 +182,88 @@ fastify.post('/api/register/verify', async (request, reply) => {
         credentialBackedUp,
         aaguid,
       } = registrationInfo;
-
       const credentialIdBase64url = credentialID.toString('base64url');
-      const existing = user.credentials.find((c) => c.credentialID === credentialIdBase64url);
-      if (!existing) {
+      const exists = (user.credentials || []).find((c) => c.credentialID === credentialIdBase64url);
+      if (!exists) {
+        user.credentials = user.credentials || [];
         user.credentials.push({
           credentialID: credentialIdBase64url,
-          publicKey: credentialPublicKey.toString('base64'),
+          credentialPublicKey: credentialPublicKey.toString('base64'),
           counter,
+          transports: attestationResponse.response?.transports || ['usb'],
           deviceType: credentialDeviceType,
           backedUp: credentialBackedUp,
           aaguid: aaguid || '',
-          transports: attestationResponse.response?.transports || [],
           createdAt: new Date().toISOString(),
+          lastUsed: new Date().toISOString(),
         });
+        await saveUser(user);
       }
     }
 
-    return verification;
+    req.session.user = { username: user.username, displayName: user.displayName };
+    res.json({ verified: verification.verified, registrationInfo: verification.registrationInfo });
   } catch (error) {
-    request.log.error(error);
-    return reply.code(400).send({ error: 'Ошибка проверки регистрации', details: error.message });
+    res.status(400).json({ error: 'Ошибка проверки регистрации', details: error.message });
   }
 });
 
-fastify.post('/api/login/options', async (request, reply) => {
-  const { username } = request.body || {};
+// LOGIN OPTIONS
+app.post('/api/login/options', async (req, res) => {
+  const { username } = req.body || {};
   const safeName = validateUsername(username);
-  if (!safeName) {
-    return reply.code(400).send({ error: 'Некорректное имя пользователя' });
-  }
-  const user = db.getUser(safeName);
-  if (!user || user.credentials.length === 0) {
-    return reply.code(404).send({ error: 'Пользователь не найден или нет credential' });
+  if (!safeName) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+  const user = await getUser(safeName);
+  if (!user || !user.credentials || user.credentials.length === 0) {
+    return res.status(404).json({ error: 'Пользователь не найден или нет credential' });
   }
 
   const options = generateAuthenticationOptions({
     rpID: RP_ID,
-    // просим не требовать PIN/UV для демо
-    userVerification: 'discouraged',
+    userVerification: modeToUV[currentMode],
     allowCredentials: user.credentials.map((cred) => ({
       id: Buffer.from(cred.credentialID, 'base64url'),
       type: 'public-key',
-      transports: cred.transports || undefined,
+      transports: cred.transports || ['usb'],
     })),
     timeout: 120000,
   });
 
   const challenge = options.challenge ?? randomBytes(32);
-
   const responsePayload = {
     challenge: toBase64url(challenge),
     rpId: options.rpID,
     allowCredentials: (options.allowCredentials || []).map((cred) => ({
       ...cred,
       id: toBase64url(cred.id),
-      transports: cred.transports || ['usb', 'nfc', 'ble', 'internal'],
+      transports: cred.transports || ['usb'],
     })),
-    timeout: options.timeout,
+    timeout: options.timeout || 120000,
     userVerification: options.userVerification,
     extensions: options.extensions,
   };
 
-  db.setChallenge(safeName, responsePayload.challenge);
-  return responsePayload;
+  await setChallenge(safeName, responsePayload.challenge);
+  res.json(responsePayload);
 });
 
-fastify.post('/api/login/verify', async (request, reply) => {
-  const { username, assertionResponse } = request.body || {};
+// LOGIN VERIFY
+app.post('/api/login/verify', async (req, res) => {
+  const { username, assertionResponse } = req.body || {};
   const safeName = validateUsername(username);
-  if (!safeName || !assertionResponse) {
-    return reply.code(400).send({ error: 'Некорректные данные авторизации' });
+  if (!safeName || !assertionResponse) return res.status(400).json({ error: 'Некорректные данные авторизации' });
+
+  const expectedChallenge = await popChallenge(safeName);
+  if (!expectedChallenge) return res.status(400).json({ error: 'Challenge не найден или просрочен' });
+
+  const user = await getUser(safeName);
+  if (!user || !user.credentials || user.credentials.length === 0) {
+    return res.status(404).json({ error: 'Пользователь не найден или нет credential' });
   }
 
-  const expectedChallenge = db.popChallenge(safeName);
-  if (!expectedChallenge) {
-    return reply.code(400).send({ error: 'Challenge не найден или просрочен' });
-  }
-
-  const user = db.getUser(safeName);
-  if (!user || user.credentials.length === 0) {
-    return reply.code(404).send({ error: 'Пользователь не найден или нет credential' });
-  }
-
-  const credentialFromClient = assertionResponse.id;
-  const authenticator = user.credentials.find((c) => c.credentialID === credentialFromClient);
-  if (!authenticator) {
-    return reply.code(400).send({ error: 'Credential не найден для пользователя' });
-  }
+  const credId = assertionResponse.id;
+  const authenticator = user.credentials.find((c) => c.credentialID === credId);
+  if (!authenticator) return res.status(400).json({ error: 'Credential не найден' });
 
   try {
     const verification = await verifyAuthenticationResponse({
@@ -246,10 +271,10 @@ fastify.post('/api/login/verify', async (request, reply) => {
       expectedChallenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: currentMode === 'pin_required',
       authenticator: {
         credentialID: Buffer.from(authenticator.credentialID, 'base64url'),
-        credentialPublicKey: Buffer.from(authenticator.publicKey, 'base64'),
+        credentialPublicKey: fromBase64(authenticator.credentialPublicKey),
         counter: authenticator.counter,
         transports: authenticator.transports,
       },
@@ -257,50 +282,53 @@ fastify.post('/api/login/verify', async (request, reply) => {
 
     if (verification.verified) {
       authenticator.counter = verification.authenticationInfo.newCounter;
+      authenticator.lastUsed = new Date().toISOString();
+      await saveUser(user);
     }
 
-    return verification;
+    req.session.user = { username: user.username, displayName: user.displayName };
+    res.json({ verified: verification.verified, authenticationInfo: verification.authenticationInfo });
   } catch (error) {
-    request.log.error(error);
-    return reply.code(400).send({ error: 'Ошибка проверки авторизации', details: error.message });
+    res.status(400).json({ error: 'Ошибка проверки авторизации', details: error.message });
   }
 });
 
-fastify.get('/api/users/:username', async (request, reply) => {
-  const { username } = request.params;
-  const safeName = validateUsername(username);
-  if (!safeName) {
-    return reply.code(400).send({ error: 'Некорректное имя пользователя' });
-  }
-  const user = db.getUser(safeName);
-  if (!user) return reply.code(404).send({ error: 'Пользователь не найден' });
-  return {
-    username: user.username,
-    createdAt: user.createdAt,
-    credentials: user.credentials.map((c) => ({
-      credentialID: c.credentialID,
-      deviceType: c.deviceType,
-      backedUp: c.backedUp,
-      aaguid: c.aaguid,
-      counter: c.counter,
-      createdAt: c.createdAt,
+// USERS LIST
+app.get('/api/users', async (req, res) => {
+  const users = await listUsers();
+  res.json(
+    users.map((u) => ({
+      username: u.username,
+      displayName: u.displayName,
+      credentialsCount: (u.credentials || []).length,
     })),
-  };
+  );
 });
 
-fastify.setNotFoundHandler((request, reply) => {
-  // отдаём SPA главную страницу
-  return reply.sendFile('index.html');
+// CURRENT USER
+app.get('/api/user', (req, res) => {
+  if (req.session.user) return res.json(req.session.user);
+  return res.status(401).json({ error: 'Не авторизован' });
+});
+
+// LOGOUT
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.json({ success: true });
+  });
+});
+
+// FALLBACK
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
 const start = async () => {
-  try {
-    await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    fastify.log.info(`Server running on http://localhost:${PORT}`);
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+  await initStorage();
+  app.listen(PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
 };
 
 start();

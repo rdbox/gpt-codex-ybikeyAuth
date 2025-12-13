@@ -1,11 +1,17 @@
 const $ = (id) => document.getElementById(id);
 const usernameInput = $('username');
+const displayNameInput = $('displayName');
 const registerBtn = $('registerBtn');
 const loginBtn = $('loginBtn');
+const logoutBtn = $('logoutBtn');
 const resetBtn = $('resetBtn');
 const stepsEl = $('steps');
 const rawEl = $('rawData');
 const serverEl = $('serverData');
+const statusEl = $('status');
+const modesEl = $('modes');
+const tabs = document.querySelectorAll('.tab');
+const displayNameWrap = $('displayNameWrap');
 
 const baseSteps = {
   register: [
@@ -25,13 +31,18 @@ const baseSteps = {
 let currentMode = 'register';
 let stepState = {};
 
-function setMode(mode) {
-  currentMode = mode;
-  stepState = {};
-  renderSteps();
-  rawEl.textContent = '';
-  serverEl.textContent = '';
+function setTab(tab) {
+  currentMode = tab;
+  tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  displayNameWrap.style.display = tab === 'register' ? 'grid' : 'none';
+  resetUI();
 }
+
+tabs.forEach((t) =>
+  t.addEventListener('click', () => {
+    setTab(t.dataset.tab);
+  }),
+);
 
 function renderSteps() {
   stepsEl.innerHTML = '';
@@ -45,7 +56,6 @@ function renderSteps() {
       ok: 'badge ok',
       fail: 'badge fail',
     }[status];
-
     const el = document.createElement('div');
     el.className = 'step';
     el.innerHTML = `
@@ -83,8 +93,6 @@ function base64urlToBuffer(str) {
 
 function prepareRegistrationOptions(opts) {
   if (!opts) throw new Error('Пустые options для регистрации');
-  if (!opts.user || !opts.user.id) throw new Error('Пустой user.id в options регистрации');
-  if (!opts.challenge) throw new Error('Пустой challenge в options регистрации');
   const pubKeyCredParams =
     (opts.pubKeyCredParams && opts.pubKeyCredParams.length && opts.pubKeyCredParams) ||
     [
@@ -94,6 +102,7 @@ function prepareRegistrationOptions(opts) {
     ];
   return {
     ...opts,
+    rp: opts.rp || {},
     pubKeyCredParams,
     challenge: base64urlToBuffer(opts.challenge),
     user: {
@@ -125,23 +134,22 @@ function publicKeyCredentialToJSON(cred) {
     rawId: bufferToBase64url(cred.rawId),
     type: cred.type,
     clientExtensionResults: cred.getClientExtensionResults(),
-    response: cred.response ? {
-      attestationObject: cred.response.attestationObject
-        ? bufferToBase64url(cred.response.attestationObject)
-        : undefined,
-      clientDataJSON: cred.response.clientDataJSON
-        ? bufferToBase64url(cred.response.clientDataJSON)
-        : undefined,
-      authenticatorData: cred.response.authenticatorData
-        ? bufferToBase64url(cred.response.authenticatorData)
-        : undefined,
-      signature: cred.response.signature
-        ? bufferToBase64url(cred.response.signature)
-        : undefined,
-      userHandle: cred.response.userHandle
-        ? bufferToBase64url(cred.response.userHandle)
-        : undefined,
-    } : {},
+    response: cred.response
+      ? {
+          attestationObject: cred.response.attestationObject
+            ? bufferToBase64url(cred.response.attestationObject)
+            : undefined,
+          clientDataJSON: cred.response.clientDataJSON
+            ? bufferToBase64url(cred.response.clientDataJSON)
+            : undefined,
+          authenticatorData: cred.response.authenticatorData
+            ? bufferToBase64url(cred.response.authenticatorData)
+            : undefined,
+          signature: cred.response.signature ? bufferToBase64url(cred.response.signature) : undefined,
+          userHandle: cred.response.userHandle ? bufferToBase64url(cred.response.userHandle) : undefined,
+          transports: cred.response.getTransports ? cred.response.getTransports() : undefined,
+        }
+      : {},
   };
 }
 
@@ -149,6 +157,7 @@ async function fetchJSON(url, data) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(data),
   });
   const json = await res.json().catch(() => ({}));
@@ -160,81 +169,108 @@ function pretty(obj) {
   return JSON.stringify(obj, null, 2);
 }
 
+async function loadSettings() {
+  const res = await fetch('/api/settings');
+  if (!res.ok) return;
+  const data = await res.json();
+  modesEl.innerHTML = '';
+  data.modes.forEach((mode) => {
+    const label = document.createElement('label');
+    label.className = 'mode';
+    label.innerHTML = `<input type="radio" name="mode" value="${mode.id}" ${mode.id === data.currentMode ? 'checked' : ''} ${data.canChangeMode ? '' : 'disabled'} /> ${mode.name}`;
+    modesEl.appendChild(label);
+  });
+  modesEl.querySelectorAll('input[type=radio]').forEach((radio) =>
+    radio.addEventListener('change', async () => {
+      await fetchJSON('/api/settings/mode', { mode: radio.value }).catch(() => {});
+      statusEl.textContent = `Режим: ${radio.value}`;
+    }),
+  );
+}
+
 async function handleRegister() {
   const username = usernameInput.value.trim();
+  const displayName = displayNameInput.value.trim() || username;
   if (!username) return alert('Введите username');
-  setMode('register');
-  setStep('options', 'running', 'Ждём challenge...');
-
+  currentMode = 'register';
+  setStep('options', 'running', 'Запрашиваем options...');
   try {
-    const options = await fetchJSON('/api/register/options', { username });
-    setStep('options', 'ok', 'Challenge получен');
-
+    const options = await fetchJSON('/api/register/options', { username, displayName });
+    setStep('options', 'ok', 'Получены options');
     const publicKey = prepareRegistrationOptions(options);
-    setStep('webauthn', 'running', 'Ожидание касания YubiKey...');
+    setStep('webauthn', 'running', 'Коснитесь ключа...');
     const cred = await navigator.credentials.create({ publicKey });
     const credentialJSON = publicKeyCredentialToJSON(cred);
     rawEl.textContent = pretty(credentialJSON);
     setStep('webauthn', 'ok', 'Credential создан');
 
-    setStep('verify', 'running', 'Отправка на сервер...');
+    setStep('verify', 'running', 'Отправляем на сервер...');
     const verification = await fetchJSON('/api/register/verify', {
       username,
       attestationResponse: credentialJSON,
     });
     serverEl.textContent = pretty(verification);
     setStep('verify', verification.verified ? 'ok' : 'fail', verification.verified ? 'Проверено' : 'Ошибка проверки');
-    setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Credential сохранён' : 'Не удалось сохранить');
+    setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Готово' : 'Ошибка');
+    statusEl.textContent = verification.verified ? 'Регистрация успешна' : 'Не удалось зарегистрировать';
   } catch (err) {
-    console.error(err);
     serverEl.textContent = err.message;
     setStep('verify', 'fail', err.message);
     setStep('done', 'fail', 'Ошибка');
+    statusEl.textContent = err.message;
   }
 }
 
 async function handleLogin() {
   const username = usernameInput.value.trim();
   if (!username) return alert('Введите username');
-  setMode('login');
-  setStep('options', 'running', 'Ждём challenge...');
-
+  currentMode = 'login';
+  setStep('options', 'running', 'Запрашиваем options...');
   try {
     const options = await fetchJSON('/api/login/options', { username });
-    setStep('options', 'ok', 'Challenge получен');
-
+    setStep('options', 'ok', 'Получены options');
     const publicKey = prepareAuthenticationOptions(options);
-    setStep('webauthn', 'running', 'Коснитесь ключа для входа...');
+    setStep('webauthn', 'running', 'Коснитесь ключа...');
     const assertion = await navigator.credentials.get({ publicKey });
     const assertionJSON = publicKeyCredentialToJSON(assertion);
     rawEl.textContent = pretty(assertionJSON);
     setStep('webauthn', 'ok', 'Assertion получен');
 
-    setStep('verify', 'running', 'Проверяем подпись...');
+    setStep('verify', 'running', 'Проверяем на сервере...');
     const verification = await fetchJSON('/api/login/verify', {
       username,
       assertionResponse: assertionJSON,
     });
     serverEl.textContent = pretty(verification);
-    setStep('verify', verification.verified ? 'ok' : 'fail', verification.verified ? 'Подпись валидна' : 'Ошибка проверки');
-    setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Вход выполнен' : 'Не удалось войти');
+    setStep('verify', verification.verified ? 'ok' : 'fail', verification.verified ? 'Подтверждено' : 'Ошибка');
+    setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Вход выполнен' : 'Ошибка');
+    statusEl.textContent = verification.verified ? 'Вход выполнен' : 'Не удалось войти';
   } catch (err) {
-    console.error(err);
     serverEl.textContent = err.message;
     setStep('verify', 'fail', err.message);
     setStep('done', 'fail', 'Ошибка');
+    statusEl.textContent = err.message;
   }
+}
+
+async function handleLogout() {
+  await fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+  statusEl.textContent = 'Сессия завершена';
 }
 
 function resetUI() {
   stepState = {};
   rawEl.textContent = '';
   serverEl.textContent = '';
+  statusEl.textContent = '';
   renderSteps();
 }
 
 registerBtn.addEventListener('click', handleRegister);
 loginBtn.addEventListener('click', handleLogin);
+logoutBtn.addEventListener('click', handleLogout);
 resetBtn.addEventListener('click', resetUI);
 
 renderSteps();
+setTab('register');
+loadSettings();

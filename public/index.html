@@ -3,58 +3,74 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>YubiKey Auth Demo · WebAuthn</title>
+  <title>YubiKey WebAuthn Demo</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="page">
-    <header class="hero">
+    <header class="header">
       <div>
-        <p class="eyebrow">YubiKey / FIDO2 / WebAuthn</p>
-        <h1>Аппаратная авторизация с YubiKey</h1>
-        <p class="lede">Регистрация и вход с физическим ключом. Видно каждый технический шаг: challenge, attestation, assertion, проверка на сервере.</p>
-        <div class="actions">
-          <input id="username" type="text" placeholder="username" autocomplete="username" />
-          <button id="registerBtn">Зарегистрироваться</button>
-          <button id="loginBtn" class="ghost">Войти с YubiKey</button>
-        </div>
-        <p class="hint">Поддерживаются ключи YubiKey с FIDO2/WebAuthn. Работает на localhost без HTTPS.</p>
+        <p class="eyebrow">WebAuthn / FIDO2</p>
+        <h1>YubiKey passwordless</h1>
+        <p class="lede">Регистрация и вход касанием ключа. Настройте режимы: только касание, PIN обязателен или авто.</p>
       </div>
-      <div class="device-callout">
-        <div class="dot"></div>
-        <div class="chip">
-          <span>YubiKey</span>
-        </div>
-        <p>Коснитесь ключа, когда появится системный диалог.</p>
+      <div class="mode-panel">
+        <p class="eyebrow">Режим</p>
+        <div id="modes" class="modes"></div>
+        <small class="muted">Меняется через API /settings.</small>
       </div>
     </header>
 
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <p class="eyebrow">Таймлайн</p>
-          <h2>Шаги WebAuthn</h2>
-        </div>
-        <button id="resetBtn" class="text-btn">Сбросить</button>
+    <section class="auth-card">
+      <div class="tabs">
+        <button class="tab active" data-tab="register">Регистрация</button>
+        <button class="tab" data-tab="login">Вход</button>
       </div>
-      <div id="steps" class="steps"></div>
+      <div class="form-grid">
+        <label>
+          <span>Username</span>
+          <input id="username" type="text" placeholder="alice" autocomplete="username" />
+        </label>
+        <label id="displayNameWrap">
+          <span>Display name</span>
+          <input id="displayName" type="text" placeholder="Alice Doe" autocomplete="name" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="registerBtn">Зарегистрироваться</button>
+        <button id="loginBtn" class="ghost">Войти</button>
+        <button id="logoutBtn" class="text-btn">Выйти</button>
+      </div>
+      <p class="hint" id="status"></p>
     </section>
 
     <section class="grid">
       <div class="card">
         <div class="card-header">
           <div>
-            <p class="eyebrow">Сырые данные</p>
-            <h3>clientDataJSON / authenticatorData</h3>
+            <p class="eyebrow">Таймлайн</p>
+            <h3>Шаги WebAuthn</h3>
+          </div>
+          <button id="resetBtn" class="text-btn">Сбросить</button>
+        </div>
+        <div id="steps" class="steps"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Детали</p>
+            <h3>Сырые данные</h3>
           </div>
         </div>
         <pre id="rawData" class="code"></pre>
       </div>
+
       <div class="card">
         <div class="card-header">
           <div>
             <p class="eyebrow">Ответ сервера</p>
-            <h3>Проверка на бэкенде</h3>
+            <h3>Проверка</h3>
           </div>
         </div>
         <pre id="serverData" class="code"></pre>
