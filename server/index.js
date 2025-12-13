@@ -69,6 +69,15 @@ fastify.post('/api/register/options', async (request, reply) => {
   // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
   const challenge = options.challenge ?? randomBytes(32);
   const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
+  const pubKeyCredParams =
+    options.pubKeyCredParams && options.pubKeyCredParams.length
+      ? options.pubKeyCredParams
+      : [
+          { type: 'public-key', alg: -8 },
+          { type: 'public-key', alg: -7 },
+          { type: 'public-key', alg: -257 },
+        ];
+
   const responsePayload = {
     rp: options.rp,
     user: {
@@ -77,11 +86,7 @@ fastify.post('/api/register/options', async (request, reply) => {
       displayName: user.username,
     },
     challenge: toBase64url(challenge),
-    pubKeyCredParams: options.pubKeyCredParams || [
-      { type: 'public-key', alg: -8 },
-      { type: 'public-key', alg: -7 },
-      { type: 'public-key', alg: -257 },
-    ],
+    pubKeyCredParams,
     timeout: options.timeout,
     attestation: options.attestation,
     authenticatorSelection: options.authenticatorSelection,

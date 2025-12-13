@@ -85,12 +85,16 @@ function prepareRegistrationOptions(opts) {
   if (!opts) throw new Error('Пустые options для регистрации');
   if (!opts.user || !opts.user.id) throw new Error('Пустой user.id в options регистрации');
   if (!opts.challenge) throw new Error('Пустой challenge в options регистрации');
-  if (!opts.pubKeyCredParams || !opts.pubKeyCredParams.length) {
-    throw new Error('Пустой pubKeyCredParams в options регистрации');
-  }
+  const pubKeyCredParams =
+    (opts.pubKeyCredParams && opts.pubKeyCredParams.length && opts.pubKeyCredParams) ||
+    [
+      { type: 'public-key', alg: -8 },
+      { type: 'public-key', alg: -7 },
+      { type: 'public-key', alg: -257 },
+    ];
   return {
     ...opts,
-    pubKeyCredParams: opts.pubKeyCredParams,
+    pubKeyCredParams,
     challenge: base64urlToBuffer(opts.challenge),
     user: {
       ...opts.user,
