@@ -21,6 +21,12 @@ fastify.register(fastifyStatic, {
   prefix: '/',
 });
 
+const toBase64url = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return Buffer.from(value).toString('base64url');
+};
+
 const validateUsername = (username) => {
   if (typeof username !== 'string') return null;
   const trimmed = username.trim();
@@ -58,6 +64,14 @@ fastify.post('/api/register/options', async (request, reply) => {
       type: 'public-key',
     })),
   });
+
+  // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
+  options.challenge = toBase64url(options.challenge);
+  options.user.id = toBase64url(options.user.id);
+  options.excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
+    ...cred,
+    id: toBase64url(cred.id),
+  }));
 
   db.setChallenge(safeName, options.challenge);
   return options;
@@ -144,6 +158,12 @@ fastify.post('/api/login/options', async (request, reply) => {
     })),
     timeout: 60000,
   });
+
+  options.challenge = toBase64url(options.challenge);
+  options.allowCredentials = (options.allowCredentials || []).map((cred) => ({
+    ...cred,
+    id: toBase64url(cred.id),
+  }));
 
   db.setChallenge(safeName, options.challenge);
   return options;
