@@ -68,20 +68,27 @@ fastify.post('/api/register/options', async (request, reply) => {
   // Преобразуем двоичные поля в base64url-строки, чтобы фронт мог корректно декодировать
   const challenge = options.challenge ?? '';
   const userId = options.user?.id ?? Buffer.from(user.userId, 'utf8');
-  options.challenge = toBase64url(challenge);
-  // Явно формируем user, чтобы не потерять поля при сериализации
-  options.user = {
-    id: toBase64url(userId),
-    name: user.username,
-    displayName: user.username,
+  const responsePayload = {
+    rp: options.rp,
+    user: {
+      id: toBase64url(userId),
+      name: user.username,
+      displayName: user.username,
+    },
+    challenge: toBase64url(challenge),
+    pubKeyCredParams: options.pubKeyCredParams,
+    timeout: options.timeout,
+    attestation: options.attestation,
+    authenticatorSelection: options.authenticatorSelection,
+    excludeCredentials: (options.excludeCredentials || []).map((cred) => ({
+      ...cred,
+      id: toBase64url(cred.id),
+    })),
+    extensions: options.extensions,
   };
-  options.excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
-    ...cred,
-    id: toBase64url(cred.id),
-  }));
 
-  db.setChallenge(safeName, options.challenge);
-  return options;
+  db.setChallenge(safeName, responsePayload.challenge);
+  return responsePayload;
 });
 
 fastify.post('/api/register/verify', async (request, reply) => {
@@ -166,14 +173,20 @@ fastify.post('/api/login/options', async (request, reply) => {
     timeout: 60000,
   });
 
-  options.challenge = toBase64url(options.challenge);
-  options.allowCredentials = (options.allowCredentials || []).map((cred) => ({
-    ...cred,
-    id: toBase64url(cred.id),
-  }));
+  const responsePayload = {
+    challenge: toBase64url(options.challenge),
+    rpId: options.rpID,
+    allowCredentials: (options.allowCredentials || []).map((cred) => ({
+      ...cred,
+      id: toBase64url(cred.id),
+    })),
+    timeout: options.timeout,
+    userVerification: options.userVerification,
+    extensions: options.extensions,
+  };
 
-  db.setChallenge(safeName, options.challenge);
-  return options;
+  db.setChallenge(safeName, responsePayload.challenge);
+  return responsePayload;
 });
 
 fastify.post('/api/login/verify', async (request, reply) => {
