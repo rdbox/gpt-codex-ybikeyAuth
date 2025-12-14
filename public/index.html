@@ -4,79 +4,125 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>YubiKey WebAuthn Demo</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/style.css?v=4" />
 </head>
 <body>
   <div class="page">
-    <header class="header">
-      <div>
+    <header class="hero">
+      <div class="hero-copy">
         <p class="eyebrow">WebAuthn / FIDO2</p>
-        <h1>YubiKey passwordless</h1>
-        <p class="lede">Регистрация и вход касанием ключа. Настройте режимы: только касание, PIN обязателен или авто.</p>
+        <h1>Вход касанием ключа</h1>
+        <p class="lede">Регистрация и авторизация с YubiKey: касание или PIN — выбирайте режим, проходите шаги, видите статус сессии и время до авто-выхода.</p>
       </div>
-      <div class="mode-panel">
-        <p class="eyebrow">Режим</p>
-        <div id="modes" class="modes"></div>
-        <small class="muted">Меняется через API /settings.</small>
+      <div class="hero-modes">
+        <div class="pill">RP: gpt-codex.b244.ru</div>
+        <div class="pill pill-soft">Origin: https://gpt-codex.b244.ru</div>
       </div>
     </header>
 
-    <section class="auth-card">
-      <div class="tabs">
-        <button class="tab active" data-tab="register">Регистрация</button>
-        <button class="tab" data-tab="login">Вход</button>
-      </div>
-      <div class="form-grid">
-        <label>
-          <span>Username</span>
-          <input id="username" type="text" placeholder="alice" autocomplete="username" />
-        </label>
-        <label id="displayNameWrap">
-          <span>Display name</span>
-          <input id="displayName" type="text" placeholder="Alice Doe" autocomplete="name" />
-        </label>
-      </div>
-      <div class="actions">
-        <button id="registerBtn">Зарегистрироваться</button>
-        <button id="loginBtn" class="ghost">Войти</button>
-        <button id="logoutBtn" class="text-btn">Выйти</button>
-      </div>
-      <p class="hint" id="status"></p>
-    </section>
-
-    <section class="grid">
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <p class="eyebrow">Таймлайн</p>
-            <h3>Шаги WebAuthn</h3>
+    <div class="layout">
+      <div class="layout-main">
+        <section class="auth-card">
+          <div class="tabs">
+            <button class="tab active" data-tab="register">Регистрация</button>
+            <button class="tab" data-tab="login">Вход</button>
           </div>
-          <button id="resetBtn" class="text-btn">Сбросить</button>
-        </div>
-        <div id="steps" class="steps"></div>
+          <div class="form-grid">
+            <label>
+              <span>Username</span>
+              <input id="username" type="text" placeholder="alice" autocomplete="username" />
+            </label>
+            <label id="displayNameWrap">
+              <span>Display name</span>
+              <input id="displayName" type="text" placeholder="Alice Doe" autocomplete="name" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="registerBtn">Зарегистрироваться</button>
+            <button id="loginBtn">Войти</button>
+            <button id="logoutBtn" class="ghost">Выйти</button>
+            <button id="resetBtn" class="text-btn">Сбросить шаги</button>
+          </div>
+          <p class="hint" id="status"></p>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <p class="eyebrow">Таймлайн</p>
+              <h3>Шаги WebAuthn</h3>
+            </div>
+          </div>
+          <div id="steps" class="steps"></div>
+        </section>
+
+        <section class="grid">
+          <div class="card data-card hidden" id="rawCard">
+            <div class="card-header">
+              <div>
+                <p class="eyebrow">Детали</p>
+                <h3>Сырые данные</h3>
+              </div>
+            </div>
+            <pre id="rawData" class="code"></pre>
+          </div>
+
+          <div class="card data-card hidden" id="serverCard">
+            <div class="card-header">
+              <div>
+                <p class="eyebrow">Ответ сервера</p>
+                <h3>Проверка</h3>
+              </div>
+            </div>
+            <pre id="serverData" class="code"></pre>
+          </div>
+        </section>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <p class="eyebrow">Детали</p>
-            <h3>Сырые данные</h3>
-          </div>
-        </div>
-        <pre id="rawData" class="code"></pre>
-      </div>
+      <div class="layout-side">
+        <section class="mode-panel">
+          <p class="eyebrow">Режим</p>
+          <div id="modes" class="modes"></div>
+          <small class="muted">Меняется через API /settings.</small>
+        </section>
 
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <p class="eyebrow">Ответ сервера</p>
-            <h3>Проверка</h3>
+        <section class="session-card" id="sessionCard">
+          <div class="session-top">
+            <div>
+              <p class="eyebrow">Статус сессии</p>
+              <h3 id="sessionStatus">Не авторизован</h3>
+              <p class="muted">После входа покажем пользователя и таймер до авто-выхода.</p>
+            </div>
+            <div class="session-badge" id="sessionBadge">offline</div>
           </div>
-        </div>
-        <pre id="serverData" class="code"></pre>
+          <div class="session-body">
+            <div class="session-row">
+              <span class="label">Пользователь</span>
+              <span id="sessionUser" class="value">—</span>
+            </div>
+            <div class="session-row">
+              <span class="label">Выход через</span>
+              <span id="sessionExpiry" class="value">—</span>
+            </div>
+          </div>
+          <div class="session-actions">
+            <button id="sessionLoginBtn">Войти</button>
+            <button id="sessionLogoutBtn" class="ghost">Выйти</button>
+          </div>
+        </section>
+
+        <section class="hero-card">
+          <p class="eyebrow">Как это работает</p>
+          <ul>
+            <li>Выберите режим: касание или PIN.</li>
+            <li>Зарегистрируйте пользователя → касание ключа.</li>
+            <li>Войдите тем же пользователем → касание/PIN.</li>
+            <li>Сессия хранится в cookie, есть таймер авто-выхода.</li>
+          </ul>
+        </section>
       </div>
-    </section>
+    </div>
   </div>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=4"></script>
 </body>
 </html>

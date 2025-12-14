@@ -1,67 +1,54 @@
 # YubiKey Auth Demo (WebAuthn/FIDO2)
 
-Демо‑микросервис для регистрации и входа с аппаратным ключом YubiKey через WebAuthn/FIDO2. Показывает весь поток: challenge → WebAuthn → attestation/assertion → проверка на сервере, с визуализацией сырых данных.
+Демо для регистрации и входа касанием YubiKey. Отдельные состояния до/после входа, таймер сессии и показ сырых данных только после успешных действий.
 
-## Что нужно
+## Требования
 - Node.js 18+
-- Аппаратный ключ с поддержкой FIDO2/WebAuthn (YubiKey)
-- Браузер с поддержкой WebAuthn (Chrome/Edge/Firefox)
+- FIDO2/WebAuthn ключ (YubiKey)
+- Браузер с WebAuthn (Chrome/Edge/Firefox)
 
-## Установка
+## Запуск локально
 ```bash
-git clone git@github.com-rdbox:rdbox/gpt-codex.git
-cd gpt-codex
 npm install
+npm start           # поднимет http://localhost:4000
 ```
-
-## Запуск
-- Сервер (Fastify + @simplewebauthn/server, статика SPA):
-  ```bash
-  npm start
-  ```
-- Открыть фронтенд: `http://localhost:3000`
-
-## Конфигурация
-Настройте переменные в `.env` (необязательно, есть значения по умолчанию):
+Если нужен другой домен/порт, задайте `.env`:
 ```
-PORT=3000
+PORT=4000
 RP_ID=localhost
+ORIGIN=http://localhost:4000
 RP_NAME=YubiKey Auth Demo
-ORIGIN=http://localhost:3000
-ATTESTATION=none   # direct для показа данных устройства
+ATTESTATION=none
 ```
 
-## Флоу регистрации
-1. Введите username → «Зарегистрироваться».
-2. Браузер получает challenge (`/api/register/options`) и вызывает `navigator.credentials.create()`.
-3. Коснитесь ключа. UI покажет `clientDataJSON`, `attestationObject`, флаги и данные, которые уходят на сервер.
-4. Сервер валидирует (challenge, rpId, origin, attestation) и сохраняет credential (publicKey, credentialId, signCount).
+Продакшн хост: `https://gpt-codex.b244.ru` (RP_ID = gpt-codex.b244.ru). Креды, созданные на другом домене, не подойдут.
 
-## Флоу входа
-1. Введите существующий username → «Войти с YubiKey».
-2. Браузер получает challenge (`/api/login/options`) и вызывает `navigator.credentials.get()`.
-3. Коснитесь ключа — получим assertion (`authenticatorData`, `signature`).
-4. Сервер проверяет подпись, rpIdHash, origin, рост `signCount`; при успехе вход завершён.
+## Поток регистрации
+1) Вкладка «Регистрация»: вводим username (и display name) → «Зарегистрироваться».  
+2) `/api/register/options` → `navigator.credentials.create()` → касание/PIN.  
+3) После успеха UI переключается на «Вход». Сырые данные и ответ сервера становятся видимыми.
 
-## API (кратко)
-- `POST /api/register/options { username }` → PublicKeyCredentialCreationOptions
-- `POST /api/register/verify { username, attestationResponse }` → { verified, registrationInfo }
-- `POST /api/login/options { username }` → PublicKeyCredentialRequestOptions
-- `POST /api/login/verify { username, assertionResponse }` → { verified, authenticationInfo }
-- `GET /api/users/:username` → список credential и signCount (демо)
+## Поток входа
+1) Вкладка «Вход»: вводим существующий username → «Войти».  
+2) `/api/login/options` → `navigator.credentials.get()` → касание/PIN.  
+3) При успехе показывается статус online, имя пользователя и таймер до авто-выхода (по cookie maxAge). Кнопки «Войти/Зарегистрироваться» скрываются, остаётся «Выйти».
+
+## Интерфейс
+- До входа: форма, выбор режима, таймлайн; данные скрыты.  
+- После входа: карточка сессии (online/offline, TTL), кнопки «Выйти», показ сырых данных и ответа сервера после действий.  
+- Скрытие/показ карточек данных завязано на результатах регистрации/входа.
+
+## API кратко
+- `POST /api/register/options` / `verify`
+- `POST /api/login/options` / `verify`
+- `GET /api/session` — статус сессии, ttlMs
+- `GET /api/settings`, `POST /api/settings/mode`
+- `GET /.well-known/webauthn` — rpId/origin метаданные
 
 ## Хранилище
-In-memory (Map). Данные живут, пока работает сервер. Структура пользователя: username, userId, credentials[{ credentialID, publicKey, counter, deviceType, backedUp, aaguid, transports }].
+JSON-файлы в `data/` (`users.json`, `challenges.json`). При необходимости миграции/очистки — останавливайте PM2 и чистите файлы.
 
-## Замечания по безопасности
-- Для продакшна нужен HTTPS (WebAuthn этого требует); localhost работает на HTTP.
-- Проверяем `origin`, `rpId`, одноразовый `challenge`, рост `signCount`.
-- Username ограничен до `a-z0-9_-` (1..32) для демо.
-
-## Типичные ошибки
-- `NotAllowedError`: пользователь отменил диалог или истёк таймаут.
-- `InvalidStateError` при регистрации: credential уже зарегистрирован.
-- `rpId`/`origin` mismatch: проверьте `.env` и домен страницы.
-
-## Разработка
-Проект без сборки фронта (простая статика). Всё лежит в `public/`, бек — в `server/`. Если нужно расширить, можно добавить Vite/React поверх текущей структуры.
+## Полезно знать
+- WebAuthn жёстко привязан к RP ID: используйте тот домен, под который регистрировали credential.  
+- `NotAllowedError` чаще всего из-за отмены/таймаута диалога или неверного RP.  
+- Все статики отдаём с `Cache-Control: no-store` + версионирование `?v=`; при изменении UI делайте hard refresh.

@@ -43,6 +43,15 @@ app.use(
   }),
 );
 app.use(express.json({ limit: '1mb' }));
+
+// Disable client caching to ensure fresh UI/CSS
+app.use((req, res, next) => {
+  if (req.method === 'GET') {
+    res.set('Cache-Control', 'no-store');
+  }
+  next();
+});
+
 app.use(
   session({
     secret: SESSION_SECRET,
@@ -119,6 +128,11 @@ app.post('/api/register/options', async (req, res) => {
       userVerification: modeToUV[currentMode],
       requireResidentKey: false,
     },
+    excludeCredentials: (user.credentials || []).map((cred) => ({
+      id: Buffer.from(cred.credentialID, 'base64url'),
+      type: 'public-key',
+      transports: cred.transports || ['usb'],
+    })),
     pubKeyCredParams: [
       { type: 'public-key', alg: -8 },
       { type: 'public-key', alg: -7 },
@@ -131,19 +145,27 @@ app.post('/api/register/options', async (req, res) => {
     challenge: toBase64url(challenge),
     rp: { name: RP_NAME, id: RP_ID },
     user: {
-      id: toBase64url(options.user.id),
+      id: user.id, // user.id is already in base64 format from storage
       name: user.username,
       displayName: user.displayName,
     },
-    pubKeyCredParams: options.pubKeyCredParams,
+    pubKeyCredParams: [
+      { type: 'public-key', alg: -8 },  // EdDSA
+      { type: 'public-key', alg: -7 },  // ES256
+      { type: 'public-key', alg: -257 }, // RS256
+    ],
     excludeCredentials: (options.excludeCredentials || []).map((cred) => ({
       id: toBase64url(cred.id),
       type: cred.type,
-      transports: ['usb', 'nfc', 'ble', 'internal'],
+      transports: cred.transports || ['usb', 'nfc', 'ble', 'internal'],
     })),
-    authenticatorSelection: options.authenticatorSelection,
-    attestation: options.attestation,
-    extensions: options.extensions,
+    authenticatorSelection: {
+      authenticatorAttachment: 'cross-platform',
+      residentKey: 'discouraged',
+      userVerification: modeToUV[currentMode],
+      requireResidentKey: false,
+    },
+    attestation: ATTESTATION,
     timeout: options.timeout || 120000,
   };
 
@@ -232,15 +254,14 @@ app.post('/api/login/options', async (req, res) => {
   const challenge = options.challenge ?? randomBytes(32);
   const responsePayload = {
     challenge: toBase64url(challenge),
-    rpId: options.rpID,
-    allowCredentials: (options.allowCredentials || []).map((cred) => ({
-      ...cred,
-      id: toBase64url(cred.id),
-      transports: cred.transports || ['usb'],
+    rpId: RP_ID,
+    allowCredentials: user.credentials.map((cred) => ({
+      id: cred.credentialID, // already in base64url format
+      type: 'public-key',
+      transports: cred.transports && cred.transports.length > 0 ? cred.transports : ['usb', 'nfc', 'ble'],
     })),
-    timeout: options.timeout || 120000,
-    userVerification: options.userVerification,
-    extensions: options.extensions,
+    timeout: 120000,
+    userVerification: modeToUV[currentMode],
   };
 
   await setChallenge(safeName, responsePayload.challenge);
@@ -315,6 +336,31 @@ app.get('/api/user', (req, res) => {
 app.post('/api/logout', (req, res) => {
   req.session.destroy(() => {
     res.json({ success: true });
+  });
+});
+
+// SESSION INFO
+app.get('/api/session', (req, res) => {
+  const user = req.session.user;
+  if (!user) return res.json({ loggedIn: false });
+  const cookie = req.session.cookie || {};
+  const expiresAt = cookie.expires instanceof Date ? cookie.expires : null;
+  const ttlMs = expiresAt ? expiresAt.getTime() - Date.now() : null;
+  res.json({
+    loggedIn: true,
+    user,
+    expiresAt: expiresAt ? expiresAt.toISOString() : null,
+    ttlMs: Number.isFinite(ttlMs) ? Math.max(ttlMs, 0) : null,
+  });
+});
+
+// WELL-KNOWN
+app.get('/.well-known/webauthn', (req, res) => {
+  res.json({
+    rpId: RP_ID,
+    origin: ORIGIN,
+    currentMode,
+    note: 'Relying Party metadata for WebAuthn trust checks',
   });
 });
 

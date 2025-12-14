@@ -12,6 +12,13 @@ const statusEl = $('status');
 const modesEl = $('modes');
 const tabs = document.querySelectorAll('.tab');
 const displayNameWrap = $('displayNameWrap');
+const sessionCard = $('sessionCard');
+const sessionStatusEl = $('sessionStatus');
+const sessionUserEl = $('sessionUser');
+const sessionExpiryEl = $('sessionExpiry');
+const sessionBadgeEl = $('sessionBadge');
+const sessionLoginBtn = $('sessionLoginBtn');
+const sessionLogoutBtn = $('sessionLogoutBtn');
 
 const baseSteps = {
   register: [
@@ -30,11 +37,15 @@ const baseSteps = {
 
 let currentMode = 'register';
 let stepState = {};
+let sessionData = { loggedIn: false };
+let sessionTimer = null;
+const dataCards = [document.getElementById('rawCard'), document.getElementById('serverCard')];
 
 function setTab(tab) {
   currentMode = tab;
   tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   displayNameWrap.style.display = tab === 'register' ? 'grid' : 'none';
+  updateActions();
   resetUI();
 }
 
@@ -43,6 +54,15 @@ tabs.forEach((t) =>
     setTab(t.dataset.tab);
   }),
 );
+
+function updateActions() {
+  const loggedIn = sessionData.loggedIn;
+  registerBtn.classList.toggle('hidden', loggedIn || currentMode !== 'register');
+  loginBtn.classList.toggle('hidden', loggedIn || currentMode !== 'login');
+  logoutBtn.classList.toggle('hidden', !loggedIn);
+  sessionLoginBtn.classList.toggle('hidden', loggedIn);
+  sessionLogoutBtn.classList.toggle('hidden', !loggedIn);
+}
 
 function renderSteps() {
   stepsEl.innerHTML = '';
@@ -169,6 +189,59 @@ function pretty(obj) {
   return JSON.stringify(obj, null, 2);
 }
 
+function formatTtl(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'менее 1 сек';
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min === 0) return `${sec} сек`;
+  return `${min} мин ${sec.toString().padStart(2, '0')} сек`;
+}
+
+function clearSessionTimer() {
+  if (sessionTimer) {
+    clearInterval(sessionTimer);
+    sessionTimer = null;
+  }
+}
+
+function renderSession() {
+  const { loggedIn, user, ttlMs, expiresAt } = sessionData;
+  sessionStatusEl.textContent = loggedIn ? 'Вы в системе' : 'Не авторизован';
+  sessionBadgeEl.textContent = loggedIn ? 'online' : 'offline';
+  sessionBadgeEl.style.background = loggedIn ? '#d1fae5' : '#fee2e2';
+  sessionBadgeEl.style.color = loggedIn ? '#065f46' : '#b91c1c';
+  sessionUserEl.textContent = loggedIn ? `${user.displayName || user.username}` : '—';
+  sessionExpiryEl.textContent = loggedIn && ttlMs ? `${formatTtl(ttlMs)} (до ${expiresAt || '—'})` : '—';
+  sessionLogoutBtn.disabled = !loggedIn;
+  updateActions();
+}
+
+async function loadSession() {
+  clearSessionTimer();
+  try {
+    const res = await fetch('/api/session', { credentials: 'include' });
+    const data = await res.json();
+    sessionData = data;
+    renderSession();
+    if (data.loggedIn && Number.isFinite(data.ttlMs) && data.ttlMs > 0) {
+      let remaining = data.ttlMs;
+      sessionTimer = setInterval(() => {
+        remaining -= 1000;
+        sessionExpiryEl.textContent = `${formatTtl(remaining)} (до ${data.expiresAt || '—'})`;
+        if (remaining <= 0) {
+          clearSessionTimer();
+          sessionData = { loggedIn: false };
+          renderSession();
+        }
+      }, 1000);
+    }
+  } catch {
+    sessionData = { loggedIn: false };
+    renderSession();
+  }
+}
+
 async function loadSettings() {
   const res = await fetch('/api/settings');
   if (!res.ok) return;
@@ -202,6 +275,7 @@ async function handleRegister() {
     const cred = await navigator.credentials.create({ publicKey });
     const credentialJSON = publicKeyCredentialToJSON(cred);
     rawEl.textContent = pretty(credentialJSON);
+    dataCards.forEach((c) => c.classList.remove('hidden'));
     setStep('webauthn', 'ok', 'Credential создан');
 
     setStep('verify', 'running', 'Отправляем на сервер...');
@@ -210,9 +284,14 @@ async function handleRegister() {
       attestationResponse: credentialJSON,
     });
     serverEl.textContent = pretty(verification);
+    dataCards.forEach((c) => c.classList.remove('hidden'));
     setStep('verify', verification.verified ? 'ok' : 'fail', verification.verified ? 'Проверено' : 'Ошибка проверки');
     setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Готово' : 'Ошибка');
-    statusEl.textContent = verification.verified ? 'Регистрация успешна' : 'Не удалось зарегистрировать';
+    statusEl.textContent = verification.verified ? 'Регистрация успешна — можно входить' : 'Не удалось зарегистрировать';
+    if (verification.verified) {
+      setTab('login');
+      await loadSession();
+    }
   } catch (err) {
     serverEl.textContent = err.message;
     setStep('verify', 'fail', err.message);
@@ -234,6 +313,7 @@ async function handleLogin() {
     const assertion = await navigator.credentials.get({ publicKey });
     const assertionJSON = publicKeyCredentialToJSON(assertion);
     rawEl.textContent = pretty(assertionJSON);
+    dataCards.forEach((c) => c.classList.remove('hidden'));
     setStep('webauthn', 'ok', 'Assertion получен');
 
     setStep('verify', 'running', 'Проверяем на сервере...');
@@ -242,9 +322,11 @@ async function handleLogin() {
       assertionResponse: assertionJSON,
     });
     serverEl.textContent = pretty(verification);
+    dataCards.forEach((c) => c.classList.remove('hidden'));
     setStep('verify', verification.verified ? 'ok' : 'fail', verification.verified ? 'Подтверждено' : 'Ошибка');
     setStep('done', verification.verified ? 'ok' : 'fail', verification.verified ? 'Вход выполнен' : 'Ошибка');
     statusEl.textContent = verification.verified ? 'Вход выполнен' : 'Не удалось войти';
+    await loadSession();
   } catch (err) {
     serverEl.textContent = err.message;
     setStep('verify', 'fail', err.message);
@@ -256,6 +338,8 @@ async function handleLogin() {
 async function handleLogout() {
   await fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
   statusEl.textContent = 'Сессия завершена';
+  await loadSession();
+  resetUI();
 }
 
 function resetUI() {
@@ -264,13 +348,17 @@ function resetUI() {
   serverEl.textContent = '';
   statusEl.textContent = '';
   renderSteps();
+  dataCards.forEach((c) => c.classList.add('hidden'));
 }
 
 registerBtn.addEventListener('click', handleRegister);
 loginBtn.addEventListener('click', handleLogin);
 logoutBtn.addEventListener('click', handleLogout);
+sessionLogoutBtn.addEventListener('click', handleLogout);
+sessionLoginBtn.addEventListener('click', () => setTab('login'));
 resetBtn.addEventListener('click', resetUI);
 
 renderSteps();
 setTab('register');
 loadSettings();
+loadSession();
