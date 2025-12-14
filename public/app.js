@@ -19,6 +19,8 @@ const sessionExpiryEl = $('sessionExpiry');
 const sessionBadgeEl = $('sessionBadge');
 const sessionLoginBtn = $('sessionLoginBtn');
 const sessionLogoutBtn = $('sessionLogoutBtn');
+const timelineCard = $('timelineCard');
+const dataCards = [document.getElementById('rawCard'), document.getElementById('serverCard')];
 
 const baseSteps = {
   register: [
@@ -39,7 +41,6 @@ let currentMode = 'register';
 let stepState = {};
 let sessionData = { loggedIn: false };
 let sessionTimer = null;
-const dataCards = [document.getElementById('rawCard'), document.getElementById('serverCard')];
 
 function setTab(tab) {
   currentMode = tab;
@@ -66,6 +67,7 @@ function updateActions() {
 
 function renderSteps() {
   stepsEl.innerHTML = '';
+  timelineCard.classList.toggle('hidden', Object.keys(stepState).length === 0);
   const steps = baseSteps[currentMode];
   steps.forEach((s) => {
     const status = stepState[s.key]?.status || 'idle';
@@ -270,6 +272,7 @@ async function handleRegister() {
   try {
     const options = await fetchJSON('/api/register/options', { username, displayName });
     setStep('options', 'ok', 'Получены options');
+    timelineCard.classList.remove('hidden');
     const publicKey = prepareRegistrationOptions(options);
     setStep('webauthn', 'running', 'Коснитесь ключа...');
     const cred = await navigator.credentials.create({ publicKey });
@@ -308,6 +311,7 @@ async function handleLogin() {
   try {
     const options = await fetchJSON('/api/login/options', { username });
     setStep('options', 'ok', 'Получены options');
+    timelineCard.classList.remove('hidden');
     const publicKey = prepareAuthenticationOptions(options);
     setStep('webauthn', 'running', 'Коснитесь ключа...');
     const assertion = await navigator.credentials.get({ publicKey });
@@ -349,6 +353,7 @@ function resetUI() {
   statusEl.textContent = '';
   renderSteps();
   dataCards.forEach((c) => c.classList.add('hidden'));
+  timelineCard.classList.add('hidden');
 }
 
 registerBtn.addEventListener('click', handleRegister);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>YubiKey WebAuthn Demo</title>
-  <link rel="stylesheet" href="/style.css?v=4" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="page">
@@ -12,7 +12,7 @@
       <div class="hero-copy">
         <p class="eyebrow">WebAuthn / FIDO2</p>
         <h1>Вход касанием ключа</h1>
-        <p class="lede">Регистрация и авторизация с YubiKey: касание или PIN — выбирайте режим, проходите шаги, видите статус сессии и время до авто-выхода.</p>
+        <p class="lede">Минимум отвлекающего текста: выберите режим, зарегистрируйте пользователя, коснитесь ключа — и увидите статус сессии.</p>
       </div>
       <div class="hero-modes">
         <div class="pill">RP: gpt-codex.b244.ru</div>
@@ -46,7 +46,7 @@
           <p class="hint" id="status"></p>
         </section>
 
-        <section class="card">
+        <section class="card hidden" id="timelineCard">
           <div class="card-header">
             <div>
               <p class="eyebrow">Таймлайн</p>
@@ -60,7 +60,7 @@
           <div class="card data-card hidden" id="rawCard">
             <div class="card-header">
               <div>
-                <p class="eyebrow">Детали</p>
+                <p class="eyebrow">После касания</p>
                 <h3>Сырые данные</h3>
               </div>
             </div>
@@ -70,8 +70,8 @@
           <div class="card data-card hidden" id="serverCard">
             <div class="card-header">
               <div>
-                <p class="eyebrow">Ответ сервера</p>
-                <h3>Проверка</h3>
+                <p class="eyebrow">После проверки</p>
+                <h3>Ответ сервера</h3>
               </div>
             </div>
             <pre id="serverData" class="code"></pre>
@@ -112,17 +112,17 @@
         </section>
 
         <section class="hero-card">
-          <p class="eyebrow">Как это работает</p>
+          <p class="eyebrow">Шаги</p>
           <ul>
-            <li>Выберите режим: касание или PIN.</li>
-            <li>Зарегистрируйте пользователя → касание ключа.</li>
-            <li>Войдите тем же пользователем → касание/PIN.</li>
-            <li>Сессия хранится в cookie, есть таймер авто-выхода.</li>
+            <li>Режим: касание или PIN.</li>
+            <li>Регистрация → касание ключа.</li>
+            <li>Вход тем же пользователем.</li>
+            <li>Статус и таймер после входа.</li>
           </ul>
         </section>
       </div>
     </div>
   </div>
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
